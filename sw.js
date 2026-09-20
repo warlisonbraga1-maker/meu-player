@@ -1,22 +1,20 @@
-{
-  "name": "Meu Player",
-  "short_name": "Player",
-  "description": "Player de música local para Android",
-  "start_url": "./index.html",
-  "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#1db954",
-  "orientation": "portrait",
-  "icons": [
-    {
-      "src": "https://cdn-icons-png.flaticon.com/512/461/461238.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    },
-    {
-      "src": "https://cdn-icons-png.flaticon.com/512/461/461238.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    }
-  ]
-}
+const CACHE_NAME = 'meu-player-v1';
+const urlsToCache = [
+  './',
+  './index.html',
+  './manifest.json'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(urlsToCache))
+  );
+});
+
+self.addEventListener('fetch', event => {
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => response || fetch(event.request))
+  );
+});
