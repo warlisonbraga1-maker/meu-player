@@ -14,11 +14,6 @@
   --bg: #0a0a0a; --surface: #1a1a1a; --surface2: #252525;
   --primary: #1db954; --text: #fff; --text2: #aaa; --border: #333;
 }
-[data-theme="blue"] { --primary: #1e88e5; }
-[data-theme="purple"] { --primary: #9c27b0; }
-[data-theme="red"] { --primary: #e53935; }
-[data-theme="orange"] { --primary: #fb8c00; }
-[data-theme="pink"] { --primary: #e91e63; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg); color: var(--text);
@@ -242,7 +237,7 @@ body.has-player .bottom-nav { bottom: 130px; }
     <h3 class="section-title">Todas <span id="libCount" style="color:var(--text2);font-weight:normal;font-size:14px"></span></h3>
     <div class="track-list" id="trackList"></div>
     <div class="empty-state" id="emptyLib">
-      <div class="icon">🎵</div>
+      <div class="icon"></div>
       <p>Nenhuma música</p>
       <p style="font-size:13px;margin-top:5px">Adicione músicas para começar</p>
     </div>
@@ -356,7 +351,7 @@ body.has-player .bottom-nav { bottom: 130px; }
 <div class="modal" id="themeModal">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>🎨 Tema</h2>
+      <h2> Tema</h2>
       <button class="icon-btn" onclick="closeModal('themeModal')">✕</button>
     </div>
     <div class="theme-grid">
@@ -483,6 +478,7 @@ function startHeartbeat() {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
     if (!trackEndedFlag && state.isPlaying && audio.paused && !audio.ended && state.currentIndex >= 0) {
+      console.log('️ Heartbeat: retomando áudio');
       audio.play().catch(e => {});
     }
   }, 2000);
@@ -491,70 +487,177 @@ function startHeartbeat() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state.isPlaying && !trackEndedFlag) {
     requestWakeLock();
-    if (audio.paused && state.currentIndex >= 0) audio.play().catch(e => {});
+    if (audio.paused && state.currentIndex >= 0) {
+      console.log('📱 App voltou ao foco, retomando');
+      audio.play().catch(e => {});
+    }
   }
 });
 
 audio.addEventListener('play', () => {
+  console.log('▶️ Play iniciado');
   state.isPlaying = true; playBtn.textContent = '⏸️';
   requestWakeLock(); startHeartbeat(); trackEndedFlag = false;
   updateMediaSession(state.tracks[state.currentIndex]);
 });
-audio.addEventListener('pause', () => { state.isPlaying = false; playBtn.textContent = '▶️'; });
+audio.addEventListener('pause', () => { 
+  console.log('⏸️ Pause');
+  state.isPlaying = false; playBtn.textContent = '▶️'; 
+});
+
+// ✅ CORREÇÃO PRINCIPAL - Evento ended
 audio.addEventListener('ended', () => {
+  console.log(' Faixa terminou - evento ended disparado');
   trackEndedFlag = true;
+  
   if (state.repeat === 'one') {
+    console.log('🔂 Repeat one - reiniciando faixa');
     audio.currentTime = 0;
-    audio.play().catch(e => retryPlay(3));
+    audio.play().then(() => {
+      trackEndedFlag = false;
+    }).catch(e => {
+      console.log('❌ Erro ao repetir:', e);
+      retryPlay(3);
+    });
   } else {
+    console.log('⏭️ Chamando nextTrack');
+    // Pequeno delay para garantir que o evento terminou completamente
     setTimeout(() => nextTrack(true), 100);
   }
 });
 
 function retryPlay(attempts = 3) {
-  if (attempts <= 0) return;
+  if (attempts <= 0) {
+    console.log('❌ Todas as tentativas de play falharam');
+    showToast('⚠️ Toque para tocar');
+    return;
+  }
+  console.log(`🔄 Tentativa ${4-attempts} de play()`);
   setTimeout(() => {
-    audio.play().then(() => { trackEndedFlag = false; }).catch(() => retryPlay(attempts - 1));
+    audio.play().then(() => { 
+      trackEndedFlag = false;
+      console.log('✅ Play após retry');
+    }).catch(e => {
+      console.log('❌ Retry falhou, restantes:', attempts - 1);
+      retryPlay(attempts - 1);
+    });
   }, 500);
 }
 
 function togglePlay() {
-  if (state.currentIndex < 0 && state.tracks.length > 0) { playTrack(0); return; }
-  if (audio.paused) audio.play().catch(e => retryPlay(3));
-  else audio.pause();
+  console.log(' togglePlay chamado');
+  if (state.currentIndex < 0 && state.tracks.length > 0) { 
+    playTrack(0); 
+    return; 
+  }
+  if (audio.paused) {
+    console.log('▶️ Usuário pediu play');
+    audio.play().catch(e => {
+      console.log('❌ Play falhou:', e);
+      retryPlay(3);
+    });
+  } else {
+    console.log('⏸️ Usuário pediu pause');
+    audio.pause();
+  }
 }
 
+// ✅ CORREÇÃO - Função playTrack melhorada
 function playTrack(index) {
-  if (index < 0 || index >= state.tracks.length) return;
+  console.log('🎵 playTrack chamado para índice:', index);
+  
+  if (index < 0 || index >= state.tracks.length) {
+    console.log('❌ Índice inválido:', index);
+    return;
+  }
+  
   const track = state.tracks[index];
   state.currentIndex = index;
-  if (track.file) audio.src = URL.createObjectURL(track.file);
-  else if (track.url) audio.src = track.url;
-  audio.play().then(() => {
-    trackEndedFlag = false; updatePlayerUI();
-    updateMediaSession(track); addToRecent(track.id);
-  }).catch(e => retryPlay(3));
+  
+  // Limpa URL anterior se existir
+  if (audio.src && audio.src.startsWith('blob:')) {
+    URL.revokeObjectURL(audio.src);
+  }
+  
+  if (track.file) {
+    audio.src = URL.createObjectURL(track.file);
+    console.log('📁 Carregando arquivo local');
+  } else if (track.url) {
+    audio.src = track.url;
+    console.log('🔗 Carregando URL');
+  }
+  
+  // Tenta tocar
+  const playPromise = audio.play();
+  if (playPromise !== undefined) {
+    playPromise.then(() => {
+      console.log('✅ playTrack: play iniciado com sucesso');
+      trackEndedFlag = false;
+      updatePlayerUI();
+      updateMediaSession(track);
+      addToRecent(track.id);
+    }).catch(error => {
+      console.log('❌ playTrack: erro no play():', error);
+      // Tenta novamente após 500ms
+      setTimeout(() => {
+        audio.play().then(() => {
+          trackEndedFlag = false;
+          updatePlayerUI();
+          console.log('✅ playTrack: segunda tentativa funcionou');
+        }).catch(e => {
+          console.log('❌ playTrack: segunda tentativa falhou:', e);
+          showToast('⚠️ Toque para continuar');
+        });
+      }, 500);
+    });
+  }
+  
   playerEl.classList.remove('hidden');
   document.body.classList.add('has-player');
 }
 
+// ✅ CORREÇÃO - Função nextTrack melhorada
 function nextTrack(fromEnded = false) {
-  if (state.tracks.length === 0) return;
+  console.log('🔄 nextTrack chamado, fromEnded:', fromEnded);
+  
+  if (state.tracks.length === 0) {
+    console.log('❌ Sem faixas na lista');
+    return;
+  }
+  
   let nextIndex;
-  if (state.shuffle) nextIndex = Math.floor(Math.random() * state.tracks.length);
-  else {
+  if (state.shuffle) {
+    nextIndex = Math.floor(Math.random() * state.tracks.length);
+    console.log('🔀 Shuffle mode, próximo índice:', nextIndex);
+  } else {
     nextIndex = state.currentIndex + 1;
     if (nextIndex >= state.tracks.length) {
-      if (state.repeat === 'all') nextIndex = 0;
-      else { audio.pause(); return; }
+      if (state.repeat === 'all') {
+        nextIndex = 0;
+        console.log(' Repeat all, voltando para início');
+      } else {
+        console.log('🏁 Fim da playlist, pausando');
+        audio.pause();
+        playBtn.textContent = '▶️';
+        state.isPlaying = false;
+        trackEndedFlag = true;
+        showToast(' Fim da playlist');
+        return;
+      }
     }
   }
+  
+  console.log('▶️ Tocando faixa índice:', nextIndex);
   playTrack(nextIndex);
 }
 
 function prevTrack() {
+  console.log('⏮️ prevTrack chamado');
   if (state.tracks.length === 0) return;
-  if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+  if (audio.currentTime > 3) { 
+    audio.currentTime = 0; 
+    return; 
+  }
   let prevIndex = state.currentIndex - 1;
   if (prevIndex < 0) prevIndex = state.tracks.length - 1;
   playTrack(prevIndex);
@@ -574,6 +677,8 @@ function toggleRepeat() {
   const btn = document.getElementById('repeatBtn');
   btn.textContent = icons[(idx + 1) % icons.length];
   btn.classList.toggle('active', state.repeat !== 'off');
+  const labels = [' Repetir desativado', ' Repetir todas', '🔂 Repetir uma'];
+  showToast(labels[modes.indexOf(state.repeat)]);
 }
 
 function toggleFav() {
@@ -616,7 +721,7 @@ function updatePlayerUI() {
   const track = state.tracks[state.currentIndex];
   if (!track) return;
   document.getElementById('playerTitle').textContent = track.name;
-  document.getElementById('favBtn').textContent = state.favorites.has(track.id) ? '❤️' : '🤍';
+  document.getElementById('favBtn').textContent = state.favorites.has(track.id) ? '❤️' : '';
   renderCurrentTab();
 }
 
@@ -676,7 +781,7 @@ function trackHTML(track, index) {
   const isFav = state.favorites.has(track.id);
   return `
     <div class="track-item ${isPlaying ? 'playing' : ''}" onclick="playTrack(${index})">
-      <div class="track-cover">${isPlaying && state.isPlaying ? '🔊' : ''}</div>
+      <div class="track-cover">${isPlaying && state.isPlaying ? '🔊' : '🎵'}</div>
       <div class="track-info">
         <div class="track-title">${track.name}</div>
         <div class="track-artist">Meu Player</div>
@@ -824,7 +929,7 @@ function exportBackup() {
   a.href = URL.createObjectURL(blob);
   a.download = `backup-${Date.now()}.json`;
   a.click();
-  showToast('📥 Backup exportado');
+  showToast(' Backup exportado');
 }
 function importBackup(e) {
   const file = e.target.files[0]; if (!file) return;
